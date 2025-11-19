@@ -24,8 +24,8 @@
 #define N(I,X...)for(int _=(I),n=_,i=0;i<n;++i){X;}
 static struct consolefontdesc desc1;
 static struct console_font_op desc2;
-static char stuff[256];
-static unsigned char font[256*32];
+static char stuff[512];
+static unsigned char font[512*32];
 static unsigned char fh,fp,fs,stuffn=0;
 static int v,c,gfxp,fontx,dimn;
 static int active=0;
@@ -55,10 +55,10 @@ static void W2(struct iovec*i,int n){
 static const char P[]={1,3,2,4};
 static void mapvideo(void);
 static void loadfont(void){
-	setfont=setfont_pio_fontx;desc1.charcount=256;desc1.charheight=32;
+	setfont=setfont_pio_fontx;desc1.charcount=512;desc1.charheight=32;
 	desc1.chardata=(void*)font;fontx=ioctl(c,GIO_FONTX,&desc1);fp=fh=desc1.charheight;
 	if(fontx) {
-		desc2.op = KD_FONT_OP_GET;desc2.width=8;desc2.height=32;desc2.charcount=256;desc2.data=font;
+		desc2.op = KD_FONT_OP_GET;desc2.width=8;desc2.height=32;desc2.charcount=512;desc2.data=font;
 		setfont=setfont_kdfontop,fontx=ioctl(c,KDFONTOP,&desc2);
 		if(desc2.width!=8)fontx=-1; // nyi?
 		fh=desc2.height;fp=32;//desc2.charcount=8;
