@@ -20,8 +20,13 @@
 #include <time.h>
 #include <errno.h>
 
+#define DEV_INPUT_SIG SIGIO
+#define DEV_TTY_SIG   (SIGRTMIN+2)
+#define DEV_VCS_SIG   (SIGRTMIN+1)
+
 #define C(X,Y,Z)__builtin_memcpy((void*)(X),(void*)(Y),(Z))
 #define N(I,X...)for(int _=(I),n=_,i=0;i<n;++i){X;}
+static unsigned long long vt_mask;static int vt_mask_set=0, vt_mask_active=0;
 static struct consolefontdesc desc1;
 static struct console_font_op desc2;
 static char stuff[512];
@@ -32,6 +37,7 @@ static int active=0;
 
 static const unsigned char cursor[128]={0x80,0xc0,0xe0,0xf0,0xf8,0xfc,0xfe,0xff,0xfe,0xf8,0x8c,0x0c,0x06,0x06,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+/* extra rows here are so i don't have to worry about going off the end when rendering */
 	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
@@ -74,24 +80,34 @@ static void ino(char *x, int i) {
 }
 static char tty_name_buf[16]={'/','d','e','v','/','t','t','y',0/*(8)*/,0,0,0,0, 0,0,0};
 
+static int fasync(int f,int sig){
+	int e;
+	return ((e=fcntl(f,F_SETSIG,sig))||(e=fcntl(f,F_SETOWN,getpid()))
+			||(e=fcntl(f,F_SETFL,fcntl(f,F_GETFL,0)|O_NONBLOCK|O_ASYNC)))?e:0;
+}
+
 static void openscreen(int i){
 	char vcsa[16]={'/','d','e','v','/','v','c','s','a',0,0,0,0,0,0,0};
+
+	if((vt_mask_active=(vt_mask_set&&(i<0||i>63||!(vt_mask&(1ull<<i))))))return;
+
 	ino(tty_name_buf+8,i);
 	__builtin_strcpy(vcsa+9,tty_name_buf+8);
 	int f=open(tty_name_buf,O_RDWR|O_NOCTTY);
 	if(ioctl(f,KDGETMODE,&gfxp)) __builtin_abort(); /* sysadmin doing something weird... */
 	if(c>=0 && c!=f)close(c),c=f;
 	loadfont();
-	if((f=open(vcsa,O_RDWR|O_NONBLOCK|O_NOCTTY))<0)close(f);else close(v),dimn=0,v=f;
+	if((f=open(vcsa,O_RDWR|O_NONBLOCK|O_NOCTTY))<0||fasync(f,DEV_VCS_SIG))close(f);else close(v),dimn=0,v=f;
 	active=0;
 }
-static void loadscreen(void){
+static void loadscreen(int _){
 	static int lastactive=-1;
 	struct vt_stat st;int r;
 
 	if(!ioctl(c,VT_GETSTATE,&st)){
 		if(lastactive!=st.v_active)openscreen(lastactive=st.v_active);
 	} else __builtin_abort();
+	if(vt_mask_active)return;
 retry:	if((4+2*dimn)==(r=pread(v,screen,2*dimn+4,0))&&dimn>0&&dimn==(screen[1]**screen)) return;
 	if(r>0) {
 		r=screen[1]**screen;
@@ -101,14 +117,12 @@ retry:	if((4+2*dimn)==(r=pread(v,screen,2*dimn+4,0))&&dimn>0&&dimn==(screen[1]**
 	} else if ((r==-1&&errno==EINTR))goto retry;
 	if(dimn < 1)__builtin_abort();
 }
-static void setscreen(void){ while((2*dimn)!=pwrite(v,screen+4,2*dimn,4)); } /* dirty track? */
+static void setscreen(void){if(vt_mask_active)return; while((2*dimn)!=pwrite(v,screen+4,2*dimn,4)); }
 
 static void drawcursor(int x, int y, int bm){
-	if(gfxp){
-// i don't know if i really want to do anything here, but it seems plausible to access kms directly and draw
-// something fancy if the display is set up for it idk... anything is better than that ugly gpm block nyi
-		return;
-	}
+	if(vt_mask_active)return;
+
+	if(gfxp)return;
 
 	if(x<0||y<0||x>=pX(screen[1])||y>=pY(screen[0]))return; /* nothing to draw */
 
@@ -138,19 +152,16 @@ static void drawcursor(int x, int y, int bm){
 		C(S(X(x),Y(y)),shadow,4);C(S(X(x),Y(y)+1),shadow+4,4);setfont();
 		if(bm)setscreen();
 	}
-
 }
 static void erasecursor(void) {
-	if(gfxp) {
-	} else {
-		unsigned char c; // need to look for the poisoned character because of scrolling
-		if(fontx){N(dimn,if((c=screen[4+i*2])==*shadow)screen[4+i*2]=*stash,screen[5+i*2]=stash[1]);}
-		else N(dimn,if((c=screen[4+i*2])<5&&c)screen[4+i*2]=stash[(P[c-1]-1)*2],screen[5+i*2]=stash[(P[c-1]-1)*2+1]);
-	}
+	if(vt_mask_active||gfxp)return;
+	unsigned char c; // need to look for the poisoned character because of scrolling
+	if(fontx){N(dimn,if((c=screen[4+i*2])==*shadow)screen[4+i*2]=*stash,screen[5+i*2]=stash[1]);}
+	else N(dimn,if((c=screen[4+i*2])<5&&c)screen[4+i*2]=stash[(P[c-1]-1)*2],screen[5+i*2]=stash[(P[c-1]-1)*2+1]);
 }
 
 #define S(X) (struct iovec){.iov_base=(X),.iov_len=__builtin_strlen(X)} /* no need for screen after this */
-static void sigio(int _, siginfo_t*s,void*u){
+static void dev_input(int _, siginfo_t*s,void*u){ // DEV_INPUT_SIG
 	static int x=0,y=0;
 	static struct __attribute__((__packed__)) {
 		unsigned char subcode;
@@ -165,7 +176,7 @@ static void sigio(int _, siginfo_t*s,void*u){
 	static char btn = 0;
 	static int need_paste = 0;
 
-	int r;
+	int r,absxy=0;
 
 	int fd=s->si_fd,ox=x,oy=y,oa=active;
 retry:	while((r=read(fd,ev,sizeof(ev)))>0) {
@@ -179,6 +190,7 @@ retry:	while((r=read(fd,ev,sizeof(ev)))>0) {
 				case KEY_LEFTALT:
 				case KEY_LEFTMETA:
 					if(!e->value && last_code == e->code && stuffn) { /* hotkey! */
+						if(vt_mask_active)break;
 						for(int i=0;i<stuffn;++i)ioctl(c,TIOCSTI,stuff+i);
 					}
 					break;
@@ -212,7 +224,12 @@ retry:	while((r=read(fd,ev,sizeof(ev)))>0) {
 				};
 				last_code= e->code;
 				break;
-//			case EV_ABS:
+			case EV_ABS: // these seem to come in very high rate on some devices, so just do the last one in each dimension
+				switch(e->code){
+				case ABS_X: x = e->value; absxy|=2; break;
+				case ABS_Y: y = e->value; absxy|=1; break;
+				};
+				break;
 			case EV_REL:
 				switch(e->code){
 				case REL_WHEEL:erasecursor();setscreen();oa=0;k.subcode=TIOCL_SCROLLCONSOLE;k.v=e->value<0?1:-1;ioctl(c,TIOCLINUX,&k);break;
@@ -223,6 +240,17 @@ retry:	while((r=read(fd,ev,sizeof(ev)))>0) {
 		}
 	}
 	if(r==-1&&errno == EINTR)goto retry; 
+	if(absxy){ // process the last absolute events
+		struct input_absinfo aa;int A[]={ABS_Y,ABS_X},a[2]={y,x};char h[]={fh,8};
+		for(int i=0;i<2;++i) {
+			if(!(absxy&(1<<i)))continue; // no update on this axis?
+			a[i] = ioctl(fd,EVIOCGABS(A[i]),&aa) ? 
+				i?ox:oy // weird: we got an absolute event, but no dimensions? just put the cursor back
+				// seems like we might get into this branch if there's a vt switch we haven't gotten notified on...
+			:((long long)a[i] + aa.minimum) * ((long long)(screen[i]*h[i])) /  (aa.maximum-aa.minimum);
+		}
+		y=a[0];x=a[1];
+	}
 	if(x<0)x=0;else if(x>=pX(screen[1]))x=pX(screen[1])-1;
 	if(y<0)y=0;else if(y>=pY(screen[0]))y=pY(screen[0])-1;
 	if(btn) {
@@ -252,36 +280,58 @@ retry:	while((r=read(fd,ev,sizeof(ev)))>0) {
 		}
 	}
 }
+static void dev_tty(int _, siginfo_t*s,void*u){ // DEV_TTY_SIG
+	char buf[128];
+	int r;
+	if((r=read(s->si_fd,buf,sizeof(buf)))>0) {
+		for(int i=0;i<r;++i)ioctl(c,TIOCSTI,stuff+i);
+	}
+}
+
 static int setup(int i,const char*dev) {
 	struct stat sb;
 
 	// allow overriding filesystem for checking devices; we've already validated access to some virtual console
 	int f=open(dev,O_RDONLY|O_NOCTTY),e=f;
 
-	if(f<0||(e=fstat(f,&sb))){goto err;}
+	if((e=f)<0)goto err;
+	if((e=fstat(f,&sb))){close(f);goto err;}
 	switch(sb.st_mode & S_IFMT){
 	case S_IFCHR:
 		switch (sb.st_rdev >> 8) {
-		case 13:
-			if((e=fcntl(f,F_SETSIG,SIGIO))||(e=fcntl(f,F_SETOWN,getpid()))
-					||(e=fcntl(f,F_SETFL,fcntl(f,F_GETFL,0)|O_NONBLOCK|O_ASYNC))){
-err:				struct iovec iov[4]={S((char*)dev),S(": "), 
- 					S(strerror(errno)),
-					S("\n")};
+		case 13: /* /dev/input/ attach keyboard or mouse */
+			if((e=fasync(f,DEV_INPUT_SIG))) {
+err:		struct iovec iov[4]={S((char*)dev),S(": "),S(strerror(errno)),S("\n")};
 				W2(iov,4);
+				if(f>=0)close(f);
 				return 0;
 			};
 			return 1;
-		};
+		case 1: /* /dev/mem? ... */
+		case 5: goto notsup; /* /dev/console? /dev/ptmx? /dev/tty? idk what to do with this */
+
+		case 7:vcs: /* /dev/ttyN and /dev/vcs*N ; limit access to specific screens */
+			if(sb.st_rdev & 63)vt_mask |= 1ull<<((sb.st_rdev & 63)-1); vt_mask_set=1;
+			close(f);return 0;
+
+		case 4:  /* serial devices? forward them to the console it's a party! */
+			if((sb.st_rdev&255)<64) goto vcs; /* but not other consoles; that's masking like vcs... */
+			/* /dev/ttyS ... */
+		case 136: /* ... and /dev/pts/N */
+		case 3: /* ... and bsd /dev/ttypX can all stuff the console keyboard */
+			if((e=fasync(f,DEV_TTY_SIG)))goto err;
+			return 1;
+
+		}; /* switch */
+notsup:
+		close(f);
 		do {
 			struct iovec iov[2]={S((char*)dev),S(": Not supported\n")};
 			W2(iov,2);
 		}while(0);
 		return 0;
 	case S_IFREG:
-		close(f);
-		if(stuffn) break; /* only one stuff-buffer */
-		f=open(dev,O_RDONLY|O_NOCTTY);
+		if(stuffn){close(f);break;} /* only one stuff-buffer */
 		int r=pread(f,stuff,sizeof(stuff),0);
 		close(f);
 		if(r>255) {
@@ -353,17 +403,30 @@ int main(int argc, char *argv[])
 
 	signal(SIGTTIN,SIG_IGN);signal(SIGTTOU,SIG_IGN);signal(SIGTSTP,SIG_IGN);
 
-	struct sigaction sa={0};sa.sa_sigaction=sigio;
-	sa.sa_flags |= SA_SIGINFO|SA_RESTART;
 	int a;
-	if((a=sigaction(SIGIO,&sa,NULL))<0) {
+	struct sigaction sa={0};sa.sa_sigaction=dev_input;
+	sa.sa_flags = SA_SIGINFO|SA_RESTART;
+	if((a=sigaction(DEV_INPUT_SIG,&sa,NULL))<0) {
+		struct iovec iov[3]={S("sigaction: "), S(strerror(errno)), S("\n")};
+		W2(iov,3);
+		exit(1);
+	}
+	sa.sa_sigaction=dev_tty;
+	if((a=sigaction(DEV_TTY_SIG,&sa,NULL))<0) {
+		struct iovec iov[3]={S("sigaction: "), S(strerror(errno)), S("\n")};
+		W2(iov,3);
+		exit(1);
+	}
+	sa.sa_handler=loadscreen;
+	sa.sa_flags = SA_RESTART;
+	if((a=sigaction(DEV_VCS_SIG,&sa,NULL))<0) {
 		struct iovec iov[3]={S("sigaction: "), S(strerror(errno)), S("\n")};
 		W2(iov,3);
 		exit(1);
 	}
 
 	int any=0;
-	loadscreen();
+	loadscreen(0);
 	N(argc-1,if(setup(i,argv[i+1]))any++);
 
 	if(any) {
@@ -373,16 +436,8 @@ int main(int argc, char *argv[])
 				S(fontx?"\n":"/vga\n")};
 			W2(iov,sizeof(iov)/sizeof(*iov));
 		}while(0);
-		while(1){
-			fd_set rfds,gfds;
-			FD_ZERO(&rfds);FD_SET(v,&rfds);
-			FD_ZERO(&gfds);FD_SET(v,&gfds);
-			select(v+1,&rfds,NULL,&gfds,NULL);
-			loadscreen();
-//			pause();
-			//write(1,".",1);
-		}
+// possible daemon/background?
+		while(1)pause();
 	}
 	exit(100);
 }
-
