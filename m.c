@@ -317,6 +317,8 @@ err:		struct iovec iov[4]={S((char*)dev),S(": "),S(strerror(errno)),S("\n")};
 		case 4:  /* serial devices? forward them to the console it's a party! */
 			if((sb.st_rdev&255)<64) goto vcs; /* but not other consoles; that's masking like vcs... */
 			/* /dev/ttyS ... */
+		case 188: /* ttyUSB */ case 224:case 208:case 204: /* --- ,,, and a mess of other serial ports */
+case 172:case 174:case 164:case 161:case 156:case 154:case 148:case 105:case 75:case 71:case 57:case 48:case 46:case 32:case 24:case 22:
 		case 136: /* ... and /dev/pts/N */
 		case 3: /* ... and bsd /dev/ttypX can all stuff the console keyboard */
 			if((e=fasync(f,DEV_TTY_SIG)))goto err;
@@ -330,6 +332,7 @@ notsup:
 			W2(iov,2);
 		}while(0);
 		return 0;
+	case S_IFIFO:	if((e=fasync(f,DEV_TTY_SIG)))goto err;return 1;
 	case S_IFREG:
 		if(stuffn){close(f);break;} /* only one stuff-buffer */
 		int r=pread(f,stuff,sizeof(stuff),0);
