@@ -11,4 +11,7 @@ linux console mouse/keyboard tool
 * works with raw `/dev/input/by-id/*` devices; does not require `/dev/input/mice`
   or [gpm](https://www.nico.schottelius.org/software/gpm/).
 
+### quick start
+
+    make && ./m /dev/input/by-id/*mouse &
 
