@@ -26,6 +26,7 @@
 
 #define C(X,Y,Z)__builtin_memcpy((void*)(X),(void*)(Y),(Z))
 #define N(I,X...)for(int _=(I),n=_,i=0;i<n;++i){X;}
+static struct winsize W={0};
 static unsigned long long vt_mask;static int vt_mask_set=0, vt_mask_active=0;
 static struct consolefontdesc desc1;
 static struct console_font_op desc2;
@@ -102,20 +103,18 @@ static void openscreen(int i){
 }
 static void loadscreen(int _){
 	static int lastactive=-1;
-	struct vt_stat st;int r,q;
+	struct vt_stat st;int r;
+	struct winsize w;
 
 	if(!ioctl(c,VT_GETSTATE,&st)){
 		if(lastactive!=st.v_active)openscreen(lastactive=st.v_active);
 	} else __builtin_abort();
 	if(vt_mask_active)return;
-retry:	if((4+2*dimn)==(r=pread(v,screen,2*dimn+4,0))&&dimn>0&&dimn==(screen[1]**screen)) return;
-	if(r>0) {
-		q=screen[1];r=q**screen;
-		munmap(screen,4+(dimx+dimn)*2);
-		dimx=q;dimn=r;mapvideo();
-		goto retry;
-	} else if ((r==-1&&errno==EINTR))goto retry;
-	if(dimn < 1)__builtin_abort();
+	for(;;){
+		if(!ioctl(c,TIOCGWINSZ,&w) && (w.ws_row!=W.ws_row||w.ws_col!=W.ws_col)) {
+			if(screen)munmap(screen,4+(dimx+dimn)*2);W=w;dimx=W.ws_col;dimn=dimx*W.ws_row;mapvideo();
+		} else if((4+2*dimn)==(r=read(v,screen,2*dimn+4)))return;
+	}
 }
 static void setscreen(void){if(vt_mask_active)return; while((2*dimn)!=pwrite(v,screen+4,2*dimn,4)); }
 
@@ -124,7 +123,7 @@ static void drawcursor(int x, int y, int bm){
 
 	if(gfxp)return;
 
-	if(x<0||y<0||x>=pX(screen[1])||y>=pY(screen[0]))return; /* nothing to draw */
+	if(x<0||y<0||x>=pX(W.ws_col)||y>=pY(W.ws_row))return; /* nothing to draw */
 
 	if(fontx) {
 		erasecursor();
@@ -146,7 +145,7 @@ static void drawcursor(int x, int y, int bm){
 		p=font+fp*1; j=k; N(fh,*p++ |= cursor[j++%sizeof(cursor)]>>(x&7));
 		p=font+fp*2;      N(fh,*p++ |= cursor[j++%sizeof(cursor)]>>(x&7));
 
-		if(X(x)<(screen[1]-1)) {
+		if(X(x)<(W.ws_col-1)) {
 			p=font+fp*3; j=k; N(fh,*p++ |= cursor[j++%sizeof(cursor)]<<(8-(x&7)));
 			p=font+fp*4;      N(fh,*p++ |= cursor[j++%sizeof(cursor)]<<(8-(x&7)));
 		}
@@ -248,17 +247,18 @@ retry:	while((r=read(fd,ev,sizeof(ev)))>0) {
 	if(r==-1&&errno == EINTR)goto retry; 
 	if(absxy){ // process the last absolute events
 		struct input_absinfo aa;int A[]={ABS_Y,ABS_X},a[2]={y,x};char h[]={fh,8};
+		unsigned short d[] = { W.ws_row, W.ws_col };
 		for(int i=0;i<2;++i) {
 			if(!(absxy&(1<<i)))continue; // no update on this axis?
 			a[i] = ioctl(fd,EVIOCGABS(A[i]),&aa) ? 
 				i?ox:oy // weird: we got an absolute event, but no dimensions? just put the cursor back
 				// seems like we might get into this branch if there's a vt switch we haven't gotten notified yet...
-			:((long long)a[i] + aa.minimum) * ((long long)(screen[i]*h[i])) /  (aa.maximum-aa.minimum);
+			:((long long)a[i] + aa.minimum) * ((unsigned long long)(d[i]*h[i])) /  (aa.maximum-aa.minimum);
 		}
 		y=a[0];x=a[1];
 	}
-	if(x<0)x=0;else if(x>=pX(screen[1]))x=pX(screen[1])-1;
-	if(y<0)y=0;else if(y>=pY(screen[0]))y=pY(screen[0])-1;
+	if(x<0)x=0;else if(x>=pX(W.ws_col))x=pX(W.ws_col)-1;
+	if(y<0)y=0;else if(y>=pY(W.ws_row))y=pY(W.ws_row)-1;
 	if(btn) {
 		if((X(ox)!=X(x)||Y(oy)!=Y(y))){
 			k.subcode=TIOCL_SETSEL;k.s.sel_mode=TIOCL_SELCHAR;
