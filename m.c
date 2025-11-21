@@ -47,7 +47,7 @@ static unsigned char stash[8], shadow[8];
 static int X(int x){return x>>3;};static int Y(int y){return y/fh;};
 static int pX(int x){return x<<3;}static int pY(int y){return y*fh;};
 
-static __attribute__((pure)) unsigned char *volatile S(int x, int y) { return screen+4+2*(screen[1]*y+x); }
+static __attribute__((pure)) unsigned char *volatile S(int x, int y) { return screen+4+2*(W.ws_col*y+x); }
 
 static void(*setfont)(void);
 static void setfont_pio_fontx(void){ioctl(c,PIO_FONTX,&desc1);}
