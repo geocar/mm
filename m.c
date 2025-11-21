@@ -145,8 +145,11 @@ static void drawcursor(int x, int y, int bm){
 
 		p=font+fp*1; j=k; N(fh,*p++ |= cursor[j++%sizeof(cursor)]>>(x&7));
 		p=font+fp*2;      N(fh,*p++ |= cursor[j++%sizeof(cursor)]>>(x&7));
-		p=font+fp*3; j=k; N(fh,*p++ |= cursor[j++%sizeof(cursor)]<<(8-(x&7)));
-		p=font+fp*4;      N(fh,*p++ |= cursor[j++%sizeof(cursor)]<<(8-(x&7)));
+
+		if(X(x)<(screen[1]-1)) {
+			p=font+fp*3; j=k; N(fh,*p++ |= cursor[j++%sizeof(cursor)]<<(8-(x&7)));
+			p=font+fp*4;      N(fh,*p++ |= cursor[j++%sizeof(cursor)]<<(8-(x&7)));
+		}
 
 		N(4,shadow[i*2]=P[i]);N(4,shadow[(i*2)+1]=stash[(i*2)+1]);N(4,if(!shadow[1+i*2])shadow[1+i*2]=15);
 		C(S(X(x),Y(y)),shadow,4);C(S(X(x),Y(y)+1),shadow+4,4);setfont();
