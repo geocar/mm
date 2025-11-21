@@ -249,7 +249,7 @@ retry:	while((r=read(fd,ev,sizeof(ev)))>0) {
 			if(!(absxy&(1<<i)))continue; // no update on this axis?
 			a[i] = ioctl(fd,EVIOCGABS(A[i]),&aa) ? 
 				i?ox:oy // weird: we got an absolute event, but no dimensions? just put the cursor back
-				// seems like we might get into this branch if there's a vt switch we haven't gotten notified on...
+				// seems like we might get into this branch if there's a vt switch we haven't gotten notified yet...
 			:((long long)a[i] + aa.minimum) * ((long long)(screen[i]*h[i])) /  (aa.maximum-aa.minimum);
 		}
 		y=a[0];x=a[1];
