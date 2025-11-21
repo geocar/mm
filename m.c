@@ -32,7 +32,7 @@ static struct console_font_op desc2;
 static char stuff[512];
 static unsigned char font[512*32];
 static unsigned char fh,fp,fs,stuffn=0;
-static int v,c,gfxp,fontx,dimn;
+static int v,c,gfxp,fontx,dimn,dimx;
 static int active=0;
 
 static const unsigned char cursor[128]={0x80,0xc0,0xe0,0xf0,0xf8,0xfc,0xfe,0xff,0xfe,0xf8,0x8c,0x0c,0x06,0x06,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -94,15 +94,15 @@ static void openscreen(int i){
 	ino(tty_name_buf+8,i);
 	__builtin_strcpy(vcsa+9,tty_name_buf+8);
 	int f=open(tty_name_buf,O_RDWR|O_NOCTTY);
-	if(ioctl(f,KDGETMODE,&gfxp)) __builtin_abort(); /* sysadmin doing something weird... */
+	if(f<0||ioctl(f,KDGETMODE,&gfxp)) __builtin_abort(); /* sysadmin doing something weird... */
 	if(c>=0 && c!=f)close(c),c=f;
 	loadfont();
-	if((f=open(vcsa,O_RDWR|O_NONBLOCK|O_NOCTTY))<0||fasync(f,DEV_VCS_SIG))close(f);else close(v),dimn=0,v=f;
+	if((f=open(vcsa,O_RDWR|O_NONBLOCK|O_NOCTTY))<0||fasync(f,DEV_VCS_SIG))close(f);else (v>=0&&close(v)),dimx=dimn=0,v=f;
 	active=0;
 }
 static void loadscreen(int _){
 	static int lastactive=-1;
-	struct vt_stat st;int r;
+	struct vt_stat st;int r,q;
 
 	if(!ioctl(c,VT_GETSTATE,&st)){
 		if(lastactive!=st.v_active)openscreen(lastactive=st.v_active);
@@ -110,9 +110,9 @@ static void loadscreen(int _){
 	if(vt_mask_active)return;
 retry:	if((4+2*dimn)==(r=pread(v,screen,2*dimn+4,0))&&dimn>0&&dimn==(screen[1]**screen)) return;
 	if(r>0) {
-		r=screen[1]**screen;
-		munmap(screen,4+dimn*2);
-		dimn=r;mapvideo();
+		q=screen[1];r=q**screen;
+		munmap(screen,4+(dimx+dimn)*2);
+		dimx=q;dimn=r;mapvideo();
 		goto retry;
 	} else if ((r==-1&&errno==EINTR))goto retry;
 	if(dimn < 1)__builtin_abort();
@@ -361,7 +361,7 @@ notsup:
 	
 }
 static void mapvideo(void){
-	if((screen = mmap(NULL,4+2*dimn,PROT_READ|PROT_WRITE,MAP_POPULATE|MAP_PRIVATE|MAP_ANONYMOUS,-1,0))==MAP_FAILED) {
+	if((screen = mmap(NULL,4+2*(dimx+dimn),PROT_READ|PROT_WRITE,MAP_POPULATE|MAP_PRIVATE|MAP_ANONYMOUS,-1,0))==MAP_FAILED) {
 		struct iovec iov[3]={S("mmap: "),S(strerror(errno)), S("\n")};
 		W2(iov,3);
 		exit(1);
@@ -395,7 +395,7 @@ int main(int argc, char *argv[])
 		// maybe i'm logged in on another console...
 		for(int i = 1; i < 128; ++i) {
 			ino(tty_name_buf+8,i);
-			if((c=open(tty_name_buf,O_RDWR|O_NOCTTY))==-1)continue;
+			if((c=open(tty_name_buf,O_RDWR|O_NOCTTY))<0)continue;
 			if(ioctl(c,KDGETMODE,&gfxp)<0)close(c),c=-1;else break;
 		}
 		// maybe i'm root
@@ -407,7 +407,7 @@ int main(int argc, char *argv[])
 	}
 	loadfont();
 
-	v = -1, dimn = 0; /* loadscreen will handle */
+	v = -1, dimx=dimn = 0; /* loadscreen will handle */
 	mapvideo(); dimn=-1; 
 
 	signal(SIGTTIN,SIG_IGN);signal(SIGTTOU,SIG_IGN);signal(SIGTSTP,SIG_IGN);
