@@ -167,10 +167,7 @@ static void dev_input(int _, siginfo_t*s,void*u){ // DEV_INPUT_SIG
 	static int x=0,y=0;
 	static struct __attribute__((__packed__)) {
 		unsigned char subcode;
-		union {
-			struct tiocl_selection s;
-			int v;
-		};
+		struct tiocl_selection s;
 	}k={0};
 	static struct input_event ev[128];
 	static int last_code = 0;
@@ -178,7 +175,7 @@ static void dev_input(int _, siginfo_t*s,void*u){ // DEV_INPUT_SIG
 	static char btn = 0;
 	static int need_paste = 0;
 
-	int r,absxy=0;
+	int r,absxy=0,z=0;
 
 	int fd=s->si_fd,ox=x,oy=y,oa=active;
 	struct timespec ts;
@@ -237,7 +234,7 @@ retry:	while((r=read(fd,ev,sizeof(ev)))>0) {
 				break;
 			case EV_REL:
 				switch(e->code){
-				case REL_WHEEL:erasecursor();setscreen();oa=0;k.subcode=TIOCL_SCROLLCONSOLE;k.v=e->value<0?1:-1;ioctl(c,TIOCLINUX,&k);break;
+				case REL_WHEEL:z+=e->value<0?1:-1;break;
 				case REL_X:x+=e->value*2;break;
 				case REL_Y:y+=e->value*2;break;
 				};
@@ -266,6 +263,15 @@ retry:	while((r=read(fd,ev,sizeof(ev)))>0) {
 			ioctl(c,TIOCLINUX,&k);oa=0;
 		}
 	} else if(active){
+		if(z) {
+			struct __attribute__((__packed__)) {
+				unsigned char subcode;
+				int v;
+			}k2={0};
+			if(oa){erasecursor();setscreen();oa=0;}
+			k2.subcode=TIOCL_SCROLLCONSOLE;k2.v=z;ioctl(c,TIOCLINUX,&k);
+			loadscreen(-1);
+		}
 		if((X(ox)!=X(x)||Y(oy)!=Y(y))){
 			struct __attribute__((__packed__)) {
 				unsigned char subcode;
