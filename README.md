@@ -46,3 +46,4 @@ tmux
 - remember you can cat `/dev/vcs` to see what's on the "screen" even if you can't see what's on the screen
 - try running as root. if that works you can try using strace to see what the difference is
 - you probably have setfont installed. try it. if it can't change the font, this isn't going to be able to either
+- can you cat your mouse (look in `/dev/input/by-id/` and see if anything stands out) and see stuff?
