@@ -97,7 +97,7 @@ static void openscreen(int i){
 	int f=open(tty_name_buf,O_RDWR|O_NOCTTY);
 	if(f<0||ioctl(f,KDGETMODE,&gfxp)) __builtin_abort(); /* sysadmin doing something weird... */
 	if(c>=0 && c!=f)close(c),c=f;
-	loadfont();
+	loadfont();W.ws_col=W.ws_row=0;
 	if((f=open(vcsa,O_RDWR|O_NONBLOCK|O_NOCTTY))<0||fasync(f,DEV_VCS_SIG))close(f);else (v>=0&&close(v)),dimx=dimn=0,v=f;
 	active=0;
 }
@@ -106,14 +106,14 @@ static void loadscreen(int _){
 	struct vt_stat st;int r;
 	struct winsize w;
 
-	if(!ioctl(c,VT_GETSTATE,&st)){
-		if(lastactive!=st.v_active)openscreen(lastactive=st.v_active);
-	} else __builtin_abort();
-	if(vt_mask_active)return;
 	for(;;){
+		if(!ioctl(c,VT_GETSTATE,&st)){
+			if(lastactive!=st.v_active)openscreen(lastactive=st.v_active);
+		} else __builtin_abort();
+		if(vt_mask_active)return;
 		if(!ioctl(c,TIOCGWINSZ,&w) && (w.ws_row!=W.ws_row||w.ws_col!=W.ws_col)) {
 			if(screen)munmap(screen,4+(dimx+dimn)*2);W=w;dimx=W.ws_col;dimn=dimx*W.ws_row;mapvideo();
-		} else if((4+2*dimn)==(r=read(v,screen,2*dimn+4)))return;
+		} else if(dimn<1)__builtin_abort(); else if((4+2*dimn)==(r=read(v,screen,2*dimn+4)))return;
 	}
 }
 static void setscreen(void){if(vt_mask_active)return; while((2*dimn)!=pwrite(v,screen+4,2*dimn,4)); }
