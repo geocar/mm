@@ -20,8 +20,8 @@
 #include <time.h>
 #include <errno.h>
 
-#define DEV_INPUT_SIG SIGIO
-#define DEV_TTY_SIG   (SIGRTMIN+2)
+#define DEV_TTY_SIG   (SIGRTMIN+3)
+#define DEV_INPUT_SIG (SIGRTMIN+2)
 #define DEV_VCS_SIG   (SIGRTMIN+1)
 
 #define C(X,Y,Z)__builtin_memcpy((void*)(X),(void*)(Y),(Z))
@@ -172,13 +172,16 @@ static void dev_input(int _, siginfo_t*s,void*u){ // DEV_INPUT_SIG
 	}k={0};
 	static struct input_event ev[128];
 	static int last_code = 0;
-	static time_t last_click[2]={0};
+	static long long last_click[2]={0};
 	static char btn = 0;
 	static int need_paste = 0;
 
 	int r,absxy=0;
 
 	int fd=s->si_fd,ox=x,oy=y,oa=active;
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME,&ts);
+
 retry:	while((r=read(fd,ev,sizeof(ev)))>0) {
 		r /= sizeof(*ev);
 		if(!active){active=1;k.s.sel_mode=TIOCL_SELCLEAR;ioctl(c,TIOCLINUX,&k);}
@@ -205,11 +208,11 @@ retry:	while((r=read(fd,ev,sizeof(ev)))>0) {
 						btn&=~1;
 						k.s.xe = X(x)+1; k.s.ye=Y(y)+1;
 						if(k.s.xe == k.s.xs && k.s.ye == k.s.ys) {
-							time_t now; time(&now);
-							if(now==last_click[0]){
+							long long now=ts.tv_sec;
+							if((now-last_click[0])<2){
 								k.subcode=TIOCL_SETSEL;
 								k.s.sel_mode=last_click[0]==last_click[1]?TIOCL_SELLINE:TIOCL_SELWORD;
-								erasecursor();setscreen();oa=0;ioctl(c,TIOCLINUX,&k);
+								if(oa){erasecursor();setscreen();oa=0;}ioctl(c,TIOCLINUX,&k);
 							} else {
 								k.subcode=TIOCL_SELCLEAR;
 							}
