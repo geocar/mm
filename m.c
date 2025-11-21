@@ -269,7 +269,7 @@ retry:	while((r=read(fd,ev,sizeof(ev)))>0) {
 				struct tiocl_selection s;
 			}k2={0};
 			k2.subcode=TIOCL_SETSEL;
-			k2.s.sel_mode=TIOCL_SELMOUSEREPORT;
+			k2.s.sel_mode=TIOCL_SELMOUSEREPORT+btn;
 			k2.s.xe = k2.s.xs=X(x)+1; k2.s.ye=k2.s.ys=Y(y)+1;
 			ioctl(c,TIOCLINUX,&k2);
 		}
